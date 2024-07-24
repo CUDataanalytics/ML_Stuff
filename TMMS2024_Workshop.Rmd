@@ -1,0 +1,459 @@
+---
+title: "AMMNET Workshop/Training on Malaria modeling"
+author: "D.K.MURIITHI"
+date: "2024-04-17"
+output:
+  html_document:  
+  word_document: default
+  pdf_document: default
+  df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.height = 8,
+	fig.width = 4,
+	message = FALSE,
+	warning = FALSE,
+	comment = NA
+)
+```
+## confirmation and setting of working directory
+
+```{r}
+setwd("C:\\Users\\Prof DK\\Desktop\\TMMS2024")
+```
+
+# Set the seed for reproducibility
+```{r}
+set.seed(2024) ## This line sets the random seed for the analysis
+```
+
+* Random seeds are used to ensure reproducibility. 
+
+* By setting the seed to 2024, you're telling the program to always start with the same "random" starting point when generating random numbers needed for the analysis. 
+
+* This is helpful for debugging or comparing results across different runs.
+
+## Installation and loading of necessary packages/libraries
+
+# Installing packages
+
+# Loading libraries
+```{r}
+library(caret) #for training machine learning models
+library(psych) ##for description of  data
+library(ggplot2) ##for data visualization
+library(caretEnsemble)##enables the creation of ensemble models
+library(tidyverse) ##for data manipulation
+library(mlbench)  ## For benchmarking ML Models
+library(flextable) ## To create and style tables
+library(mltools) #for hyperparameter tuning
+library(tictoc) #for determining the time taken for a model to run
+library(ROSE)  ## for random oversampling
+library(smotefamily) ## for smote sampling
+library(ROCR) ##For ROC curve
+library(pROC) ## For visualizing, smoothing, and comparing ROC curves
+library(e1071) ## For statistical modeling and  machine learning tasks
+library(class) ## For classification using k-Nearest Neighbors and other methods
+library(caTools) ## For splitting data into training and testing sets
+library(MASS) ## Provides plotting functions and datasets
+library(ISLR) ## for practical applications of statistical learning methods
+library(boot) ## Useful for performing bootstrap resampling
+library(cvTools) ## Contains functions for cross-validation, bootstrapping, and other resampling methods
+```
+
+## INTRODUCTION
+
+Machine learning (ML) is a subfield of artificial intelligence (AI) that focuses on the development of algorithms capable of learning and making predictions or decisions based on inputs and data (Sarker, 2021). 
+
+*   The process of developing a machine learning model begins with the collection and preprocessing of data
+
+*   Data preprocessing includes data cleaning, transformation, organization, imputation, and labelling
+
+#Types of Machine Learning;
+
+1. Supervised Learning: The model is trained on labeled data. Examples include regression and classification tasks.
+
+2. Unsupervised Learning: The model is trained on unlabeled data, identifying patterns and relationships. Examples include clustering and association tasks.
+
+3. Semi-Supervised Learning: Combines both labeled and unlabeled data to improve learning accuracy.
+
+4. Reinforcement Learning: The model learns through trial and error, receiving rewards or penalties based on actions performed
+
+
+## Loading the given Malaria data
+
+```{r}
+mdata = read.csv("Malaria-Data.csv", header = TRUE)
+head(mdata,4)
+```
+
+```{r}
+attach(mdata)
+#dim(mdata)      ## View the Dimension of the Data
+#names(mdata)     ## View the variable/features/column names
+#summary(mdata)    ## Descriptive Statistics
+#describe(mdata)   ## Descriptive Statistics
+#sum(is.na(mdata))  ## Check for missing data
+```
+
+## Note: For the purpose of this training: It is assumed that the data is already clean and preprocessed 
+
+# Rename the classes of the Target variable and plot it
+```{r}
+mdata$severe_maleria <- factor(mdata$severe_maleria,
+                               levels = c(0,1),
+                               labels = c("Not infected", "Infected"))
+```
+
+# Plot Target Variable
+```{r}
+plot(factor(severe_maleria), 
+     names= c('Not Infected', 'Infected'), 
+     col=c("green","red"), ylim=c(0, 300), 
+     ylab='Respondent', xlab='Malaria Diagnosis')
+#box()
+```
+#Or use ggplot 
+
+
+```{r}
+ggplot(mdata, aes(x = factor(severe_maleria),fill = severe_maleria)) + 
+  geom_bar() + 
+  labs(x = "Malaria Detected", y = "Respondent") +
+  theme_bw()
+```
+
+## DATA PARTITION FOR MACHINE LEARNING
+
+```{r}
+index = sample(2, nrow(mdata),replace =T, prob=c(0.70,0.30))
+train = mdata[index ==1,]
+test = mdata[index ==2,]
+```
+
+# Get the dimensions of your train and test data
+```{r}
+dim(train)
+dim(test)
+```
+
+# Now Let's train some machine learning models using package caret
+
+* The caret R package (short for Classification and regression Training) to carry out machine learning tasks in RStudio
+
+* The caret package offers a range of tools and models for classification and regression machine learning problems(Kuhn et al. 2021)
+
+* In fact, it offers over 239 different machine learning models from which to choose. 
+
+* Don’t worry, we don’t expect you to use them all!
+
+## VIEW THE MODELS IN CARET
+
+```{r}
+models= getModelInfo()
+#names(models)
+```
+
+#Check for zero variance predictors:
+
+```{r}
+nzv <- nearZeroVar(mdata[,-18], saveMetrics = TRUE) ## Function called nearZeroVar and captures its output in the variable nzv
+```
+
+# The purpose of this code is to identify features in a dataset with near zero variance. Here's a breakdown of what each part does:
+
+* mdata[,-18]: This part selects all columns of the data in mdata and excludes the last 18 column.
+
+* nearZeroVar: This is likely a user-defined function that performs the main analysis
+
+* saveMetrics = TRUE: This argument instructs the nearZeroVar function to save additional metrics during its analysis (potentially standard deviation for each feature).
+
+* print(nzv): This line simply prints the output of the nearZeroVar function, which is a list of column names that have near zero variance.
+
+# In essence, this code helps you clean your data by finding features that barely change across your observations. These features might not be informative for your analysis and can be removed to improve the efficiency of your models.
+
+* The results above show that there is no feature with zero variance
+
+# Remove nzv
+```{r}
+#mdata1 <- mdata[, !nzv$nzv] ## Removing features with little to no variation
+#dim(mdata1)
+```
+# Reasons to Remove NZV Features
+
+* You can prevent them from interfering with the learning process of algorithms and potentially improve model accuracy
+
+* Reduces computational cost: Fewer features means less computation needed for training models
+
+# Prepare training scheme for cross-validation 
+```{r}
+control <- trainControl(method="repeatedcv", number=10, repeats=5)
+```
+
+
+```{r}
+#models= getModelInfo()
+#names(models)
+```
+# TRAIN OR BUILD MACHINE LEARNING MODELS
+
+# Train a Support Vector Machine (SVM) model
+```{r}
+tic()
+SvmModel <- train(factor(severe_maleria)~., data=train, method="svmRadial", trControl=control, na.action = na.omit)
+toc()
+SvmModel
+Svmpred= predict(SvmModel,newdata = test)
+SVM_CM<- confusionMatrix(Svmpred,as.factor(test$severe_maleria), positive = "Infected", mode="everything")
+SVM_CM
+M1 <- SVM_CM$byClass[c(1, 2, 5, 7, 11)]
+M1
+```
+
+Let's break down svm code what each line does:
+
+* tic(): This function starts measuring the execution time. It's a placeholder to track how long the next line takes to run.
+
+* toc(): This function stops measuring the execution time and presumably prints the elapsed time for training the model.
+
+* train:  is a function from a machine learning library in R (like caret) used to train models.
+
+* factor(severe_maleria)~. defines the formula for the model. 
+  **Here, "severe_malaria" is the target variable (categorical, converted to factors using factor()), and 
+  **the tilde (~) indicates we're predicting it based on all other features in the "train" data set.
+
+* data=train specifies the training data set.
+
+* method="svmRadial" defines the model type as a Support Vector Machine (SVM) with a Radial kernel.
+
+* trControl=control sets the training parameters likely defined in the control object.
+
+* na.action = na.omit tells the function to omit rows with missing values (NA) during training.
+
+* The entire line trains the model and stores it in the variable SvmModel.
+
+* SvmModel: This line by itself doesn't execute any code. It just prints the contents of the SvmModel variable, which likely contains the trained SVM model object. This can be useful for further analysis or prediction using the trained model.
+
+* Overall, this code snippet trains a Radial SVM model to predict the presence of severe malaria based on features in the "train" data set. It sets a random seed for reproducibility, measures the training time, and then stores the trained model for further use.
+
+* mode='everything' tells the function to calculate all metrics supported by the confusionMatrix function, including precision, recall, F1-score, and more.
+
+
+# Train a Random Forest model
+```{r}
+tic()
+RFModel <- train(factor(severe_maleria)~., data=train, method="rf", trControl=control, na.action = na.omit)
+toc()
+RFModel
+RFpred=predict(RFModel,newdata = test)
+RF_CM<- confusionMatrix(RFpred,as.factor(test$severe_maleria), positive = "Infected", mode='everything')
+RF_CM
+M2<- RF_CM$byClass[c(1, 2, 5, 7, 11)]
+M2
+```
+# Plotting Random Forest confusion matrix
+```{r}
+fourfoldplot(RF_CM$table, col=rainbow(4), main="RF Confusion Matrix") ##RF Confusion Matrix 4fold plot
+```
+
+# Show relative importance of features
+```{r}
+plot(varImp(RFModel, scale=T))                                       
+```
+
+# Create ROC curve for RF model
+```{r}
+# Make predictions on the test set using type='prob'
+predrf <- predict(RFModel, newdata = test, type = "prob")
+# Create a prediction object needed by ROCR
+pred_rf <- prediction(predrf[, "Infected"], test$severe_maleria)
+# Calculate performance measures like ROC curve
+perf_rf <- performance(pred_rf, "tpr", "fpr")
+# Plot the ROC curve
+plot(perf_rf, colorize = TRUE, main = "ROC Curve-Random Forest")
+# Compute AUC
+auc_value <- performance(pred_rf, "auc")@y.values[[1]]
+auc_label <- paste("AUC =", round(auc_value, 2))
+# Add AUC value as text on the plot
+text(0.5, 0.3, auc_label, col = "blue", cex = 1.5)  # Adjust position
+```
+# Train an Logisitic Regression model
+
+```{r}
+logRegModel <- train(factor(severe_maleria)~., data=train, method="glm", trControl=control, na.action = na.omit)
+logRegModel
+logRegpred=predict(logRegModel,newdata = test)
+logReg_CM<- confusionMatrix(logRegpred,as.factor(test$severe_maleria), positive = 'Infected', mode='everything')
+logReg_CM
+M3<- logReg_CM$byClass[c(1, 2, 5, 7, 11)]
+M3
+
+#plotting confusion matrix
+logReg_CM$table
+fourfoldplot(logReg_CM$table, col=rainbow(4), main="LR Confusion Matrix")
+plot(varImp(logRegModel, scale=T))
+
+# Make predictions on the test set using type='prob'
+predlogReg <- predict(logRegModel, newdata = test, type = "prob")
+# Create a prediction object needed by ROCR
+pred_logReg <- prediction(predlogReg[, "Infected"], test$severe_maleria)
+# Calculate performance measures like ROC curve
+perf_logReg <- performance(pred_logReg, "tpr", "fpr")
+# Plot the ROC curve
+plot(perf_logReg, colorize = TRUE, main = "ROC Curve-Logistic Regression")
+# Compute AUC
+auc_value <- performance(pred_logReg, "auc")@y.values[[1]]
+auc_label <- paste("AUC =", round(auc_value, 2))
+# Add AUC value as text on the plot
+text(0.5, 0.3, auc_label, col = "blue", cex = 1.5)  # Adjust position and other text parameters as needed
+```
+
+# Train a k- Nearest Neigbour model
+
+```{r}
+knnModel <- train(factor(severe_maleria)~., data = train, method ="knn", trControl = control)
+#knnModel
+knnpred = predict(knnModel,newdata = test)
+knn_CM<- confusionMatrix(knnpred,as.factor(test$severe_maleria), positive = 'Infected', mode='everything')
+M4<- knn_CM$byClass [c(1, 2, 5, 7, 11)]
+M4
+#plotting confusion matrix
+knn_CM$table
+fourfoldplot(knn_CM$table, col=rainbow(4), main="KNN Confusion Matrix")
+plot(varImp(knnModel, scale=T))
+```
+
+## Train a Neural Net model
+
+```{r}
+tic()
+nnModel <- train(factor(severe_maleria)~., data=train, method="nnet", trControl=control)
+toc()
+nnModel
+nnpred=predict(nnModel,newdata = test)
+nn_CM<- confusionMatrix(nnpred,as.factor(test$severe_maleria), positive = 'Infected', mode='everything')
+M5<- nn_CM$byClass[c(1, 2, 5, 7, 11)]
+M5
+#plotting confusion matrix
+nn_CM$table
+fourfoldplot(nn_CM$table, col=rainbow(4), main="Neural Network Confusion Matrix")
+plot(varImp(nnModel, scale=T))
+```
+# Train a Naive Bayes model
+
+```{r}
+NBModel <- train(factor(severe_maleria)~., data=train, method="nb",trControl=control)
+NBModel
+NBpred=predict(NBModel,newdata = test)
+NB_CM<- confusionMatrix(NBpred,as.factor(test$severe_maleria), positive = 'Infected', mode='everything')
+M6<- NB_CM$byClass[c(1, 2, 5, 7, 11)]
+M6
+#plotting confusion matrix
+NB_CM$table
+fourfoldplot(NB_CM$table, col=rainbow(4), main="Naive Bayes Confusion Matrix")
+plot(varImp(NBModel, scale=T))
+```
+
+## Train a Linear Discriminant Analysis model
+
+```{r}
+LDAModel <- train(factor(severe_maleria)~., data=train, method="lda", trControl=control)
+LDAModel
+LDApred=predict(LDAModel,newdata = test)
+LDA_CM<- confusionMatrix(LDApred,as.factor(test$severe_maleria), positive = 'Infected', mode='everything')
+M7<- LDA_CM$byClass[c(1, 2, 5, 7, 11)]
+M7
+#plotting confusion matrix
+LDA_CM$table
+fourfoldplot(LDA_CM$table, col=rainbow(4), main="LDA Confusion Matrix")
+plot(varImp(LDAModel, scale=T))
+```
+
+# Train a Linear Vector Quantization model
+```{r}
+LVQModel <- train(factor(severe_maleria)~., data=train, method="lvq", trControl=control)
+LVQModel
+LVQpred=predict(LVQModel,newdata = test)
+LVQ_CM<- confusionMatrix(LVQpred,as.factor(test$severe_maleria), positive = 'Infected', mode='everything')
+LVQ_CM
+M8<- LVQ_CM$byClass[c(1, 2, 5, 7, 11)]
+M8
+#plotting confusion matrix
+LVQ_CM$table
+fourfoldplot(LVQ_CM$table, col=rainbow(4), main="LDA Confusion Matrix")
+plot(varImp(LVQModel, scale=T))
+```
+
+# Train a Bagging model
+
+```{r}
+tic()
+bagModel <- train(factor(severe_maleria)~., data=train, method="treebag", trControl=control)
+toc()
+bagModel
+bagpred=predict(bagModel,newdata = test)
+bag_CM<- confusionMatrix(bagpred,as.factor(test$severe_maleria), positive = 'Infected', mode='everything')
+M9<- bag_CM$byClass[c(1, 2, 5, 7, 11)]
+M9
+#plotting confusion matrix
+bag_CM$table
+fourfoldplot(bag_CM$table, col=rainbow(4), main="Bagging Confusion Matrix")
+plot(varImp(bagModel, scale=T))
+```
+# Train a Boosting model
+```{r}
+tic()
+boModel <- train(factor(severe_maleria)~., data=train, method="ada", trControl=control)
+toc()
+boModel
+bopred=predict(boModel,newdata = test)
+bo_CM<- confusionMatrix(bopred,as.factor(test$severe_maleria), positive = 'Infected', mode='everything')
+M10<- bo_CM$byClass[c(1, 2, 5, 7, 11)]
+M10
+#plotting confusion matrix
+bo_CM$table
+fourfoldplot(bo_CM$table, col=rainbow(4), main="Boosting Confusion Matrix")
+plot(varImp(boModel, scale=T))
+```
+
+# Tabulate your Results [xtable(measure.score, digits = 3)]
+```{r}
+measure <-round(data.frame(SVM = M1, RF = M2, LR = M3, KNN = M4, NN = M5, NB = M6, LDA = M7, LVQ = M8, Bagging = M9, Boosting = 10), 3) 
+dim(measure)
+rownames(measure)=c('Sensitivity', 'Specificity', 'Precision','F1-Score', 'Balanced Accuracy')
+flextable(measure)
+measure
+```
+
+# Collect all resamples and compare the models
+
+Resampling is a vital technique in statistics and machine learning to assess the accuracy of a model by repeatedly drawing samples from a training set and evaluating the model on these samples. Four resampling Approach
+# Cross-validation
+This involves splitting the data into multiple subsets (folds), training the model on some folds, and testing it on the remaining fold. The process is repeated for each fold
+# Bootstrap resampling 
+This involves drawing samples with replacement from the dataset and building a model on each sample. This helps in estimating the distribution of the model's accuracy.
+# Repeated cross-validation 
+This involves performing cross-validation multiple times to reduce the variability of the results
+# Leave-One-Out Cross-Validation (LOOCV) 
+LOOCVis a special case of cross-validation where the number of folds equals the number of data points. Each data point is used once as a test set
+
+```{r}
+results <- resamples(list(SVM=SvmModel, 
+                          RF=RFModel,
+                          LR=logRegModel,
+                          knn=knnModel,
+                          NB=NBModel,
+                          LDA=LDAModel,
+                          LVQ=LVQModel,
+                          Bagging=bagModel,
+                         Bo=boModel ))
+# summarize the distributions of the results 
+summary(results)
+# boxplots of results
+bwplot(results)
+# dot plots of results
+ dotplot(results)
+```
